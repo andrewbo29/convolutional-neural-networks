@@ -179,11 +179,6 @@ class FullyConnectedNet(object):
       layer_num += 1
     self.params['W%d' % (layer_num + 1)] = np.random.normal(scale=weight_scale, size=(hidden_dims[-1], num_classes))
     self.params['b%d' % (layer_num + 1)] = np.zeros(num_classes)
-
-    for i in range(1, self.num_layers + 1):
-      print 'W%d' % i
-      print self.params['W%d' % i].shape 
-
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
@@ -218,7 +213,6 @@ class FullyConnectedNet(object):
     Input / output: Same as TwoLayerNet above.
     """
     X = X.astype(self.dtype)
-    print X.shape
     mode = 'test' if y is None else 'train'
 
     # Set train/test mode for batchnorm params and dropout param since they
@@ -246,17 +240,13 @@ class FullyConnectedNet(object):
     hidden_caches = []
 
     hidden, hidden_cache = affine_relu_forward(X, self.params['W1'], self.params['b1'])
-    print 'W1', hidden.shape
     hiddens.append(hidden)
     hidden_caches.append(hidden_cache)
     for i in range(1, self.num_layers - 1):
       hidden, hidden_cache = affine_relu_forward(hiddens[i - 1], self.params['W%d' % (i + 1)], self.params['b%d' % (i + 1)])
-      print 'W%d' % (i + 1), hidden.shape
       hiddens.append(hidden)
       hidden_caches.append(hidden_cache)
-    print len(hiddens), len(hidden_cache)
     scores, scores_cache = affine_forward(hiddens[-1], self.params['W%d' % self.num_layers], self.params['b%d' % self.num_layers])
-    print 'W%d' % self.num_layers, scores.shape
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
@@ -286,7 +276,7 @@ class FullyConnectedNet(object):
     grads['W%d' % self.num_layers] += self.reg * self.params['W%d' % self.num_layers]
 
     for i in range(self.num_layers - 2, -1, -1):
-      da, grads['W%d' % (i + 1)], grads['b%d' % (i + 1)] = affine_relu_backward(da, hidden_cache[i])
+      da, grads['W%d' % (i + 1)], grads['b%d' % (i + 1)] = affine_relu_backward(da, hidden_caches[i])
       grads['W%d' % (i + 1)] += self.reg * self.params['W%d' % (i + 1)]
     ############################################################################
     #                             END OF YOUR CODE                             #
