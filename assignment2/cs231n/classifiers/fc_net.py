@@ -172,10 +172,16 @@ class FullyConnectedNet(object):
     ############################################################################
     self.params['W1'] = np.random.normal(scale=weight_scale, size=(input_dim, hidden_dims[0]))
     self.params['b1'] = np.zeros(hidden_dims[0])
+    if self.use_batchnorm:
+        self.params['gamma1'] = np.ones(hidden_dims[0])
+        self.params['beta1'] = np.zeros(hidden_dims[0])
     layer_num = 1
     while (layer_num < len(hidden_dims)):
       self.params['W%d' % (layer_num + 1)] = np.random.normal(scale=weight_scale, size=(hidden_dims[layer_num - 1], hidden_dims[layer_num]))
       self.params['b%d' % (layer_num + 1)] = np.zeros(hidden_dims[layer_num])
+      if self.use_batchnorm:
+          self.params['gamma%d' % (layer_num + 1)] = np.ones(hidden_dims[layer_num])
+          self.params['beta%d' % (layer_num + 1)] = np.zeros(hidden_dims[layer_num])
       layer_num += 1
     self.params['W%d' % (layer_num + 1)] = np.random.normal(scale=weight_scale, size=(hidden_dims[-1], num_classes))
     self.params['b%d' % (layer_num + 1)] = np.zeros(num_classes)
@@ -239,14 +245,55 @@ class FullyConnectedNet(object):
     hiddens = []
     hidden_caches = []
 
-    hidden, hidden_cache = affine_relu_forward(X, self.params['W1'], self.params['b1'])
-    hiddens.append(hidden)
-    hidden_caches.append(hidden_cache)
+    # hidden, hidden_cache = affine_relu_forward(X, self.params['W1'], self.params['b1'])
+    # hiddens.append(hidden)
+    # hidden_caches.append(hidden_cache)
+    # for i in range(1, self.num_layers - 1):
+    #   hidden, hidden_cache = affine_relu_forward(hiddens[i - 1], self.params['W%d' % (i + 1)], self.params['b%d' % (i + 1)])
+    #   hiddens.append(hidden)
+    #   hidden_caches.append(hidden_cache)
+    # scores, scores_cache = affine_forward(hiddens[-1], self.params['W%d' % self.num_layers], self.params['b%d' % self.num_layers])
+
+    hidden_caches.append({})
+    hidden_affine, hidden_cache_affine = affine_forward(X, self.params['W1'], self.params['b1'])
+    hiddens.append(hidden_affine)
+    # hidden_caches.append(hidden_cache_affine)
+    hidden_caches[0]['affine'] = hidden_cache_affine
+    bn = hidden_affine
+    if self.use_batchnorm:
+        bn, bn_cache = batchnorm_forward(hidden_affine, self.params['gamma1'], self.params['beta1'], self.bn_params[0])
+        hiddens.append(bn)
+        # hidden_caches.append(bn_cache)
+        hidden_caches[0]['bn'] = bn_cache
+    hidden_relu, hidden_cache_relu = relu_forward(bn)
+    hiddens.append(hidden_relu)
+    hidden_caches[0]['relu'] = hidden_cache_relu
+    if self.use_dropout:
+        dropout_hidden, dropout_cache = dropout_forward(hidden_relu, self.dropout_param)
+        hiddens.append(dropout_hidden)
+        hidden_caches[0]['dropout'] = dropout_cache
+    # hidden_caches.append(hidden_cache_relu)
     for i in range(1, self.num_layers - 1):
-      hidden, hidden_cache = affine_relu_forward(hiddens[i - 1], self.params['W%d' % (i + 1)], self.params['b%d' % (i + 1)])
-      hiddens.append(hidden)
-      hidden_caches.append(hidden_cache)
+        hidden_caches.append({})
+        hidden_affine, hidden_cache_affine = affine_forward(hiddens[i - 1], self.params['W%d' % (i + 1)], self.params['b%d' % (i + 1)])
+        hiddens.append(hidden_affine)
+        # hidden_caches.append(hidden_cache_affine)
+        hidden_caches[i]['affine'] = hidden_cache_affine
+        bn = hidden_affine
+        if self.use_batchnorm:
+            bn, bn_cache = batchnorm_forward(hidden_affine, self.params['gamma%d' % (i + 1)], self.params['beta%d' % (i + 1)], self.bn_params[i])
+            hiddens.append(bn)
+            hidden_caches[i]['bn'] = bn_cache
+        hidden_relu, hidden_cache_relu = relu_forward(bn)
+        hiddens.append(hidden_relu)
+        # hidden_caches.append(hidden_cache_relu)
+        hidden_caches[i]['relu'] = hidden_cache_relu
+        if self.use_dropout:
+            dropout_hidden, dropout_cache = dropout_forward(hidden_relu, self.dropout_param)
+            hiddens.append(dropout_hidden)
+            hidden_caches[i]['dropout'] = dropout_cache
     scores, scores_cache = affine_forward(hiddens[-1], self.params['W%d' % self.num_layers], self.params['b%d' % self.num_layers])
+
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
@@ -271,13 +318,22 @@ class FullyConnectedNet(object):
     ############################################################################
     loss, da_loss = softmax_loss(scores, y)
 
-    loss += 0.5 * np.sum([np.sum(self.params['W%d' % i] * self.params['W%d' % i]) for i in range(1, self.num_layers + 1)])
+    loss += 0.5 * self.reg * np.sum([np.sum(self.params['W%d' % i] * self.params['W%d' % i]) for i in range(1, self.num_layers + 1)])
     da, grads['W%d' % self.num_layers], grads['b%d' % self.num_layers] = affine_backward(da_loss, scores_cache)
     grads['W%d' % self.num_layers] += self.reg * self.params['W%d' % self.num_layers]
 
     for i in range(self.num_layers - 2, -1, -1):
-      da, grads['W%d' % (i + 1)], grads['b%d' % (i + 1)] = affine_relu_backward(da, hidden_caches[i])
-      grads['W%d' % (i + 1)] += self.reg * self.params['W%d' % (i + 1)]
+    #   da, grads['W%d' % (i + 1)], grads['b%d' % (i + 1)] = affine_relu_backward(da, hidden_caches[i])
+    #   grads['W%d' % (i + 1)] += self.reg * self.params['W%d' % (i + 1)]
+
+        if self.use_dropout:
+            da = dropout_backward(da, hidden_caches[i]['dropout'])
+        da = relu_backward(da, hidden_caches[i]['relu'])
+        if self.use_batchnorm:
+            da, grads['gamma%d' % (i + 1)], grads['beta%d' % (i + 1)] = batchnorm_backward(da, hidden_caches[i]['bn'])
+        da, grads['W%d' % (i + 1)], grads['b%d' % (i + 1)] = affine_backward(da, hidden_caches[i]['affine'])
+        grads['W%d' % (i + 1)] += self.reg * self.params['W%d' % (i + 1)]
+
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
