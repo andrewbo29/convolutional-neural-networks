@@ -18,7 +18,7 @@ class ThreeLayerConvNet(object):
   
   def __init__(self, input_dim=(3, 32, 32), num_filters=32, filter_size=7,
                hidden_dim=100, num_classes=10, weight_scale=1e-3, reg=0.0,
-               dtype=np.float32):
+               dtype=np.float32, use_batchnorm=False):
     """
     Initialize a new network.
     
@@ -47,13 +47,26 @@ class ThreeLayerConvNet(object):
     # hidden affine layer, and keys 'W3' and 'b3' for the weights and biases   #
     # of the output affine layer.                                              #
     ############################################################################
+    self.use_batchnorm = use_batchnorm
+
     C, H, W = input_dim
     self.params['W1'] = np.random.normal(0, weight_scale, (num_filters, C, filter_size, filter_size))
     self.params['b1'] = np.zeros(num_filters)
+    if self.use_batchnorm:
+        self.params['gamma1'] = np.ones(num_filters)
+        self.params['beta1'] = np.zeros(num_filters)
     self.params['W2'] = np.random.normal(0, weight_scale, (num_filters*H/2*W/2, hidden_dim))
     self.params['b2'] = np.zeros(hidden_dim)
+    if self.use_batchnorm:
+        self.params['gamma2'] = np.ones(hidden_dim)
+        self.params['beta2'] = np.zeros(hidden_dim)
     self.params['W3'] = np.random.normal(0, weight_scale, (hidden_dim, num_classes))
     self.params['b3'] = np.zeros(num_classes)
+
+    self.bn_params = []
+    if self.use_batchnorm:
+      self.bn_params = [{'mode': 'train'} for i in range(2)]
+
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
@@ -85,12 +98,25 @@ class ThreeLayerConvNet(object):
     # computing the class scores for X and storing them in the scores          #
     # variable.                                                                #
     ############################################################################
-    # conv_out, conv_cache = conv_forward_im2col(X, W1, b1, conv_param)
+    mode = 'test' if y is None else 'train'
+    if self.use_batchnorm:
+      for bn_param in self.bn_params:
+        bn_param[mode] = mode
+
     conv_out, conv_cache = conv_forward_fast(X, W1, b1, conv_param)
-    relu1_out, relu1_cache = relu_forward(conv_out)
+    if self.use_batchnorm:
+        spatial_bn_out, spatial_bn_cache = spatial_batchnorm_forward(conv_out, self.params['gamma1'], self.params['beta1'], self.bn_params[0])
+    else:
+        spatial_bn_out = conv_out
+    relu1_out, relu1_cache = relu_forward(spatial_bn_out)
     pool_out, pool_cache = max_pool_forward_fast(relu1_out, pool_param)
-    affine_relu_out, affine_relu_cache = affine_relu_forward(pool_out, W2, b2)
-    affine2_out, affine2_cache = affine_forward(affine_relu_out, W3, b3)
+    affine_out, affine_cache = affine_forward(pool_out, W2, b2)
+    if self.use_batchnorm:
+        bn_out, bn_cache = batchnorm_forward(affine_out, self.params['gamma2'], self.params['beta2'], self.bn_params[1])
+    else:
+        bn_out = affine_out
+    relu2_out, relu2_cache = relu_forward(bn_out)
+    affine2_out, affine2_cache = affine_forward(relu2_out, W3, b3)
     scores = affine2_out
     ############################################################################
     #                             END OF YOUR CODE                             #
@@ -113,15 +139,28 @@ class ThreeLayerConvNet(object):
     affine2_dx, affine2_dw, affine2_db = affine_backward(dscores, affine2_cache)
     grads['W3'] = affine2_dw + self.reg * self.params['W3']
     grads['b3'] = affine2_db
+
+    relu2_dx = relu_backward(affine2_dx, relu2_cache)
+
+    if self.use_batchnorm:
+        dx2, grads['gamma2'], grads['beta2'] = batchnorm_backward(relu2_dx, bn_cache)
+    else:
+        dx2 = relu2_dx
      
-    affine1_dx, affine1_dw, affine1_db = affine_relu_backward(affine2_dx, affine_relu_cache)
+    # affine1_dx, affine1_dw, affine1_db = affine_relu_backward(affine2_dx, affine_relu_cache)
+    affine1_dx, affine1_dw, affine1_db = affine_backward(dx2, affine_cache)
     grads['W2'] = affine1_dw + self.reg * self.params['W2']
     grads['b2'] = affine1_db
 
     pool_dx = max_pool_backward_fast(affine1_dx, pool_cache)
     relu_dx = relu_backward(pool_dx, relu1_cache)
-    # conv_dx, conv_dw, conv_db = conv_backward_im2col(relu_dx, conv_cache)
-    conv_dx, conv_dw, conv_db = conv_backward_fast(relu_dx, conv_cache)
+    
+    if self.use_batchnorm:
+        dx1, grads['gamma1'], grads['beta1'] = spatial_batchnorm_backward(relu_dx, spatial_bn_cache)
+    else:
+        dx1 = relu_dx
+
+    conv_dx, conv_dw, conv_db = conv_backward_fast(dx1, conv_cache)
     grads['W1'] = conv_dw + self.reg * self.params['W1']
     grads['b1'] = conv_db
     ############################################################################
